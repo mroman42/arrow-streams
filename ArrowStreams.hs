@@ -1,4 +1,4 @@
--- Arrow Streams
+-- Arrow Monoidal Streams
 
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE TypeSynonymInstances      #-}
@@ -31,22 +31,16 @@ data StreamWithMemory c n x y where
 -- EXAMPLES --
 --------------
 fibonacci :: Stream (Kleisli Identity) () Int
-fibonacci = fbk $ runitS
-  >>> copy                                >>> lunitinvS *** id
-  >>> delay (k1 *** wait) *** id
-  >>> delay fby *** id
-  >>> plus                                >>> lunitinvS
-  >>> k0 *** id
-  >>> fby
-  >>> copy
+fibonacci = proc () -> do
+  rec
+    fib <- fby -< (0 , fib + nextFib)
+    waitFib <- wait -< fib
+    nextFib <- fby -< (1 , waitFib)
+  returnA -< fib
+
 
 liftEffect a = lift (Kleisli a)
 
--- walk :: Stream (Kleisli IO) (()) (Int)
--- walk = fbk $ proc (w, ()) -> do
---     u <- unif -< ()
---     v <- fby -< (0, u + w)
---     returnA -< (v,v)
 walk :: Stream (Kleisli IO) (()) (Int)
 walk = proc () -> do
   u <- (liftEffect $ \() -> do
@@ -80,12 +74,6 @@ ehrenfest = proc () -> do
     unif :: Stream (Kleisli IO) () Int
     unif = liftEffect (\() -> randomRIO (1,4))
 
-    empty :: Stream (Kleisli IO) () Urn
-    empty = arr (\() -> [])
-
-    full :: Stream (Kleisli IO) () Urn
-    full = arr (\() -> [1,2,3,4])
-
     move :: Stream (Kleisli IO) (Urn, Int) Urn
     move = arr (\(u,i) ->
       if elem i u
@@ -117,7 +105,7 @@ compS
     (compS laterf laterg)
 
 comp :: (Arrow c) => Stream c x y -> Stream c y z -> Stream c x z
-comp f g = lact lunitinv (compS f g)
+comp f g = lact (arr $ \a -> ((),a)) (compS f g)
 
 
 
@@ -134,7 +122,7 @@ tensorS
      returnA -< ((p,q),(z,w))) (tensorS laterf laterg)
 
 tensor :: Arrow c => Stream c x y -> Stream c x' y' -> Stream c (x,x') (y,y')
-tensor f g = lact lunitinv (tensorS f g)
+tensor f g = lact (arr $ \a -> ((),a)) (tensorS f g)
 
 
 lact :: (Arrow c) => c n m -> StreamWithMemory c m x y -> StreamWithMemory c n x y
@@ -150,100 +138,44 @@ fbkS (StreamWithMemory now later) =
 
    -- Definition 5.7. Feedback operation.
    nowFeedback :: (Arrow c) => c (m,(s,x)) (n,(t,y)) -> c ((m,s),x) ((n,t),y)
-   nowFeedback f = associnv >>> f >>> assoc
+   nowFeedback f = proc ((m,s),x) -> do
+     (n,(t,y)) <- f -< (m,(s,x))
+     returnA -< ((n,t),y)
 
 fbk :: (Arrow c) => Stream c (s,x) (s,y) -> Stream c x y
 fbk t = lact (arr (\() -> ((),undefined))) (fbkS t)
 
 idS :: (Arrow c) => Stream c x x
-idS = StreamWithMemory (id) idS
+idS = StreamWithMemory id idS
 
 
 lift :: (Arrow c) => c x y -> Stream c x y
 lift f = StreamWithMemory (id *** f) (lift f)
-
-liftarr :: (Arrow c) => (x -> y) -> Stream c x y
-liftarr s = lift $ arr s
 
 instance (Arrow c) => Category (Stream c) where
   id = idS
   (.) f g = comp g f
 
 instance (Arrow c) => Arrow (Stream c) where
-  arr = liftarr
+  arr s = lift $ arr s
   (***) = tensor
 
 instance (Arrow c) => ArrowLoop (Stream c) where
-  loop f = fbk $ sigma >>> f >>> sigma
-
+  loop f = fbk $ proc (a,s) -> do
+    (t,b) <- f -< (s,a)
+    returnA -< (b,t)
 
 delay :: (Arrow c) => Stream c x y -> Stream c x y
 delay f = StreamWithMemory (id *** undefined)  f
 
-
-
-
-------------
--- ARROWS --
-------------
-assoc :: Arrow c => c (x,(y,z)) ((x,y),z)
-assoc = arr $ \(x,(y,z)) -> ((x,y),z)
-assocS :: Arrow c => Stream c (x,(y,z)) ((x,y),z)
-assocS = lift assoc
-
-associnv :: Arrow c => c ((x,y),z) (x,(y,z))
-associnv = arr $ \((x,y),z) -> (x,(y,z))
-associnvS :: Arrow c => Stream c ((x,y),z) (x,(y,z))
-associnvS = lift $ associnv
-
-lunit :: Arrow c => c ((),a) a
-lunit = arr $ \((),a) -> a
-lunitS :: Arrow c => Stream c ((),a) a
-lunitS = lift $ lunit
-
-lunitinv :: Arrow c => c a ((),a)
-lunitinv = arr $ \a -> ((),a)
-lunitinvS :: Arrow c => Stream c a ((),a)
-lunitinvS = lift $ lunitinv
-
-runit :: Arrow c => c (a,()) a
-runit = arr $ \(a,()) -> a
-runitS :: Arrow c => Stream c (a,()) a
-runitS = lift $ runit
-
-runitinv :: Arrow c => c a (a,())
-runitinv = arr $ \a -> (a,())
-runitinvS :: Arrow c => Stream c a (a,())
-runitinvS = lift $ runitinv
-
-
-sigma :: Arrow c => c (x,y) (y,x)
-sigma = arr $ \(x,y) -> (y,x)
-
-sigmaS :: Arrow c => Stream c (x,y) (y,x)
-sigmaS = lift $ sigma
-
-
 ----------------
 -- GENERATORS --
 ----------------
-fby :: (Monad t) => Stream (Kleisli t) (a , a) a
-fby = StreamWithMemory (Kleisli $ \((),(x,y)) -> pure ((),x)) (lift (arr snd))
-
-copy :: (Monad t) => Stream (Kleisli t) a (a,a)
-copy = lift (proc a -> do returnA -< (a,a))
-
-
-k0,k1,k2 :: (Arrow c) => Stream c () Int
-k0 = lift $ arr (\() -> 0)
-k1 = lift $ arr (\() -> 1)
-k2 = lift $ arr (\() -> 2)
-
-plus :: (Arrow c) => Stream c (Int,Int) Int
-plus = lift $ arr (\(a,b) -> a + b)
+fby :: (Arrow c) => Stream c (a , a) a
+fby = StreamWithMemory (arr $ \((),(x,y)) -> ((),x)) (lift (arr snd))
 
 wait :: (Arrow c) => Stream c a a
-wait = fbk sigmaS
+wait = fbk (proc (a,b) -> do returnA -< (b,a))
 
 ------------
 -- SYSTEM --
