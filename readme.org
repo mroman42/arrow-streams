@@ -8,5 +8,28 @@ dataflow programming.
  - [[https://arxiv.org/submit/4138937/view][Monoidal Streams for Dataflow Programming]].
    /Elena Di Lavore, Giovanni de Felice, Mario Roman./
 
-This repository implements premonoidal streams over Haskell =Arrows= (Set-based
-Freyd categories). Premonoidal streams are Arrows themselves.
+This repository implements premonoidal streams over Haskell =Arrows=
+(approximating Set-based Freyd categories). Premonoidal streams are =ArrowLoop=
+themselves.
+
+*Example:* The Ehrenfest model for two urns and four balls.
+
+#+begin_src haskell
+ehrenfest :: Stream (Kleisli IO) () (Urn,Urn)
+ehrenfest = proc () -> do
+
+  rec
+
+    -- The left box is initially empty, the right box is initially full.
+    l <- fby -< ([],        leftBox)
+    r <- fby -< ([1,2,3,4], rightBox)
+
+    -- We pick a ball uniformly.
+    ball <- unif -< ()
+
+    -- And we move it from one box to the other.
+    leftBox <- move -< (l, ball)
+    rightBox <- move -< (r, ball)
+
+  returnA -< (leftBox,rightBox)
+#+end_src

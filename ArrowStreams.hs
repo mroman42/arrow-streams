@@ -40,41 +40,54 @@ fibonacci = fbk $ runitS
   >>> fby
   >>> copy
 
+liftEffect a = lift (Kleisli a)
+
+-- walk :: Stream (Kleisli IO) (()) (Int)
+-- walk = fbk $ proc (w, ()) -> do
+--     u <- unif -< ()
+--     v <- fby -< (0, u + w)
+--     returnA -< (v,v)
 walk :: Stream (Kleisli IO) (()) (Int)
-walk = fbk $ proc (w, ()) -> do
-    u <- unif -< ()
-    v <- fby -< (0, u + w)
-    returnA -< (v,v)
- where
-   unif :: Stream (Kleisli IO) () Int
-   unif = lift $ Kleisli (\() -> do
-      boolean <- randomIO
-      return $ if boolean then 1 else -1)
+walk = proc () -> do
+  u <- (liftEffect $ \() -> do
+           boolean <- randomIO
+           return (if boolean then 1 else -1)) -< ()
+  rec v <- fby -< (0, u + v)
+  returnA -< v
+
 
 type Urn = [Int]
 
+ehrenfest :: Stream (Kleisli IO) () (Urn,Urn)
+ehrenfest = proc () -> do
 
-ehrenfest :: Stream (Kleisli IO) (()) (Urn,Urn)
-ehrenfest = fbk                          $ runitS>>> lunitinv *** lunitinv
-  >>> (full *** idS) *** (empty *** idS)    >>> runitinv
-  >>> (fby *** fby) *** unif
-  >>> idS *** copy                          >>> associnv >>> idS *** assoc
-  >>> idS *** (sigma *** idS)               >>> idS *** associnv >>> assoc
-  >>> move *** move
-  >>> copy *** copy                          >>> associnv >>> idS *** assoc
-  >>> idS *** (sigma *** idS)               >>> idS *** associnv >>> assoc
+  rec
+
+    -- The left box is initially empty, the right box is initially full.
+    l <- fby -< ([],        leftBox)
+    r <- fby -< ([1,2,3,4], rightBox)
+
+    -- We pick a ball uniformly.
+    ball <- unif -< ()
+
+    -- And we move it from one box to the other.
+    leftBox <- move -< (l, ball)
+    rightBox <- move -< (r, ball)
+
+  returnA -< (leftBox,rightBox)
+
   where
     unif :: Stream (Kleisli IO) () Int
-    unif = lift $ Kleisli (\() -> randomRIO (1,4))
+    unif = liftEffect (\() -> randomRIO (1,4))
 
     empty :: Stream (Kleisli IO) () Urn
-    empty = lift $ arr (\() -> [])
+    empty = arr (\() -> [])
 
     full :: Stream (Kleisli IO) () Urn
-    full = lift $ arr (\() -> [1,2,3,4])
+    full = arr (\() -> [1,2,3,4])
 
     move :: Stream (Kleisli IO) (Urn, Int) Urn
-    move = lift $ arr (\(u,i) ->
+    move = arr (\(u,i) ->
       if elem i u
         then (delete i u)
         else (insert i u))
@@ -218,7 +231,7 @@ fby :: (Monad t) => Stream (Kleisli t) (a , a) a
 fby = StreamWithMemory (Kleisli $ \((),(x,y)) -> pure ((),x)) (lift (arr snd))
 
 copy :: (Monad t) => Stream (Kleisli t) a (a,a)
-copy = lift (Kleisli $ \a -> pure (a,a))
+copy = lift (proc a -> do returnA -< (a,a))
 
 
 k0,k1,k2 :: (Arrow c) => Stream c () Int
