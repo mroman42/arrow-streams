@@ -1,8 +1,9 @@
--- Kleisli Streams
+-- Arrow Streams
 
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE TypeSynonymInstances      #-}
 {-# LANGUAGE FlexibleInstances        #-}
+{-# LANGUAGE Arrows        #-}
 
 
 module Main where
@@ -30,7 +31,7 @@ data StreamWithMemory c n x y where
 -- EXAMPLES --
 --------------
 fibonacci :: Stream (Kleisli Identity) () Int
-fibonacci = fbk                             $ runitS
+fibonacci = fbk $ runitS
   >>> copy                                >>> lunitinvS *** id
   >>> delay (k1 *** wait) *** id
   >>> delay fby *** id
@@ -40,12 +41,10 @@ fibonacci = fbk                             $ runitS
   >>> copy
 
 walk :: Stream (Kleisli IO) (()) (Int)
-walk = fbk
-    $ (id *** unif)
-  >>> plus                                >>> lunitinvS
-  >>> k0 *** id
-  >>> fby
-  >>> copy
+walk = fbk $ proc (w, ()) -> do
+    u <- unif -< ()
+    v <- fby -< (0, u + w)
+    returnA -< (v,v)
  where
    unif :: Stream (Kleisli IO) () Int
    unif = lift $ Kleisli (\() -> do
@@ -95,22 +94,14 @@ compS :: (Arrow c) =>
   StreamWithMemory c n y z ->
   StreamWithMemory c (m , n) x z
 compS
-  (StreamWithMemory fnow flater)
-  (StreamWithMemory gnow glater) =
-  StreamWithMemory (sequentialComposition fnow gnow) (compS flater glater)
- where
-
-   -- Definition 5.2.
-   -- Sequential composition, "now".
-   sequentialComposition :: Arrow c
-     => c (m , x) (p , y)
-     -> c (n , y) (q , z)
-     -> c ((m,n),x) ((p,q),z)
-   sequentialComposition f g =
-        sigma  *** id    >>> associnv
-    >>> id *** f       >>> assoc
-    >>> sigma  *** id  >>> associnv
-    >>> id *** g       >>> assoc
+  (StreamWithMemory f laterf)
+  (StreamWithMemory g laterg) =
+  StreamWithMemory
+    (proc ((m,n),x) -> do
+       (p,y) <- f -< (m,x)
+       (q,z) <- g -< (n,y)
+       returnA -< ((p,q),z))
+    (compS laterf laterg)
 
 comp :: (Arrow c) => Stream c x y -> Stream c y z -> Stream c x z
 comp f g = lact lunitinv (compS f g)
@@ -122,21 +113,12 @@ tensorS :: (Arrow c) =>
   StreamWithMemory c p' x' y' ->
   StreamWithMemory c (p , p') (x,x') (y,y')
 tensorS
-  (StreamWithMemory fnow flater)
-  (StreamWithMemory gnow glater) =
-  StreamWithMemory (parallelCompTosition fnow gnow) (tensorS flater glater)
- where
-
-   -- Definition 5.3. Parallel compTosition.
-   parallelCompTosition :: Arrow c
-     => c (m,x) (p,z)
-     -> c (n,y) (q,w)
-     -> c ((m,n),(x,y)) ((p,q),(z,w))
-   parallelCompTosition f g =
-         associnv                   >>> id *** assoc
-     >>> (id *** (sigma *** id))  >>> id *** associnv >>> assoc
-     >>> (f *** g)                >>> associnv            >>> id *** assoc
-     >>> (id *** (sigma *** id))  >>> id *** associnv >>> assoc
+  (StreamWithMemory f laterf)
+  (StreamWithMemory g laterg) =
+  StreamWithMemory (proc ((m,n),(x,y)) -> do
+     (p,z) <- f -< (m,x)
+     (q,w) <- g -< (n,y)
+     returnA -< ((p,q),(z,w))) (tensorS laterf laterg)
 
 tensor :: Arrow c => Stream c x y -> Stream c x' y' -> Stream c (x,x') (y,y')
 tensor f g = lact lunitinv (tensorS f g)
