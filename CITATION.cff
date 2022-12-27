@@ -1,0 +1,8 @@
+cff-version: 1.0.0
+message: "If you use this software, please cite the following."
+authors:
+  - family-names: Román    
+    given-names: Mario
+title: "Arrow Streams for Dataflow Programming"
+version: 1.0.0
+date-released: 2022-12-27
