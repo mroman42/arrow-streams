@@ -1,5 +1,7 @@
 #+TITLE: Arrow streams
 
+[[https://doi.org/10.5281/zenodo.15978541][https://zenodo.org/badge/457428731.svg]]
+
 Monoidal streams are a coinductive construction that generalizes streams to
 arbitrary monoidal categories. Monoidal streams form a feedback monoidal
 category that allows us to interpret signal flow graphs and give semantics to
